@@ -1,0 +1,44 @@
+# Local development and integration-test stack: NATS JetStream + Postgres.
+# Not for staging or production (deployment is deferred, ADR-0001 AM12).
+#
+# NATS accounts, users and permissions (public nkeys only) are generated from the
+# api-specs event schemas by go-common's `busdev` tool into HOSTRY_NATS_CONF_DIR
+# (default ./.nats) as accounts.conf; see dev/README.md and dev/up.sh.
+name: ${COMPOSE_PROJECT_NAME:-hostry-dev}
+
+services:
+  nats:
+    # Pinned to the version verified in research r15 item 30. Pin by digest when deploying.
+    image: nats:2.15.3-alpine
+    command: ["-c", "/etc/nats/nats.conf"]
+    volumes:
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
+      - ${HOSTRY_NATS_CONF_DIR:-./.nats}/accounts.conf:/etc/nats/accounts.conf:ro
+      - nats-data:/data
+    ports:
+      - "127.0.0.1:${HOSTRY_NATS_PORT:-4222}:4222"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8222/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      # Dev-only throwaway credential, never reused anywhere else.
+      POSTGRES_PASSWORD: hostry-dev-only
+      POSTGRES_USER: hostry
+      POSTGRES_DB: hostry
+    ports:
+      - "127.0.0.1:${HOSTRY_PG_PORT:-5432}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hostry -d hostry"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+volumes:
+  nats-data:
