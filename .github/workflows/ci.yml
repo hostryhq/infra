@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs to save Actions minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compose files parse and resolve
+        run: |
+          # compose.yaml mounts a generated accounts.conf; an empty placeholder is enough to resolve config.
+          export HOSTRY_NATS_CONF_DIR="$RUNNER_TEMP/nats-conf"
+          mkdir -p "$HOSTRY_NATS_CONF_DIR"
+          touch "$HOSTRY_NATS_CONF_DIR/accounts.conf"
+          find . -name 'compose*.y*ml' -not -path './.git/*' -print0 |
+            while IFS= read -r -d '' f; do
+              echo "== $f"
+              docker compose -f "$f" config --quiet
+            done
+      - name: shellcheck (preinstalled on ubuntu runners)
+        run: |
+          mapfile -d '' scripts < <(find . -name '*.sh' -not -path './.git/*' -print0)
+          if [ ${#scripts[@]} -eq 0 ]; then echo "no shell scripts"; exit 0; fi
+          shellcheck --severity=style "${scripts[@]}"
+
+  secrets-scan:
+    uses: hostryhq/.github/.github/workflows/gitleaks.yml@main
+
+  # Single status check for the ruleset: "ci / required".
+  required:
+    if: always()
+    needs: [validate, secrets-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: All required jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
