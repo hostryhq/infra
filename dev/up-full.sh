@@ -8,6 +8,7 @@
 #   dev/up-full.sh infra    only the Docker part (keys, NATS, Postgres, streams and consumers)
 #   dev/up-full.sh status   state and health of every service
 #   dev/up-full.sh down     stop the services and remove the containers and volumes
+#   dev/up-full.sh stop|start|restart <service>   one service process (fault injection in the soak)
 #
 # Layout: the repositories are siblings of infra (override with HOSTRY_REPOS_DIR). Each service
 # repo may carry an uncommitted go.work for unmerged library branches; GOPRIVATE is set here.
@@ -227,6 +228,7 @@ env_sync() {
     # (public half is in identity's packs, see HOSTRY_OP_SIGNING_PUB_FILE), the service-key registry.
     export SYNC_TENANCY_URL="http://127.0.0.1:$p_tenancy"
     export SYNC_OP_SIGNING_KEY_FILE="$keys/sync-op.key"
+    export SYNC_OP_KID=op-1 # the kid identity's packs publish the op-signing public key under
     export SYNC_SERVICE_KEYS="$keys/service-keys.jwks.json"
   fi
 }
@@ -337,6 +339,24 @@ start_services() {
   fi
 }
 
+# svc_ctl stop, start or restart one service process (fault injection in the soak); the binary and logs are the ones `up` made.
+svc_ctl() {
+  local verb="$1" name="$2"
+  case " ${services[*]} " in *" $name "*) ;; *) die "unknown service $name" ;; esac
+  if [ "$verb" = stop ] || [ "$verb" = restart ]; then
+    if alive "$name"; then kill "$(cat "$run/$name.pid")" 2>/dev/null || true; fi
+    for _ in $(seq 1 50); do alive "$name" || break; sleep 0.1; done
+    rm -f "$run/$name.pid"
+  fi
+  if [ "$verb" = start ] || [ "$verb" = restart ]; then
+    case "$name" in
+      identity | tenancy | catalog | billing | orders) launch "$name" serve ;;
+      *) launch "$name" ;;
+    esac
+    wait_healthy "$name" || die "$name did not become healthy"
+  fi
+}
+
 status() {
   local s port
   for s in "${services[@]}"; do
@@ -372,5 +392,6 @@ case "${1:-up}" in
   infra) start_infra ;;
   status) status ;;
   down) stop_all ;;
-  *) die "usage: up-full.sh [up|infra|status|down]" ;;
+  stop | start | restart) svc_ctl "$1" "${2:?service name}" ;;
+  *) die "usage: up-full.sh [up|infra|status|down|stop|start|restart <service>]" ;;
 esac
