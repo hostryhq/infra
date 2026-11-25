@@ -8,7 +8,7 @@
 #   dev/up-full.sh infra    only the Docker part (keys, NATS, Postgres, streams and consumers)
 #   dev/up-full.sh status   state and health of every service
 #   dev/up-full.sh down     stop the services and remove the containers and volumes
-#   dev/up-full.sh stop|start|restart <service>   one service process (fault injection in the soak)
+#   dev/up-full.sh stop|start|restart|rebuild <service>   one service process (fault injection in the soak; rebuild also builds the binary again)
 #
 # Layout: the repositories are siblings of infra (override with HOSTRY_REPOS_DIR). Each service
 # repo may carry an uncommitted go.work for unmerged library branches; GOPRIVATE is set here.
@@ -343,6 +343,7 @@ start_services() {
 svc_ctl() {
   local verb="$1" name="$2"
   case " ${services[*]} " in *" $name "*) ;; *) die "unknown service $name" ;; esac
+  if [ "$verb" = rebuild ]; then build_service "$name"; verb=restart; fi
   if [ "$verb" = stop ] || [ "$verb" = restart ]; then
     if alive "$name"; then kill "$(cat "$run/$name.pid")" 2>/dev/null || true; fi
     for _ in $(seq 1 50); do alive "$name" || break; sleep 0.1; done
@@ -392,6 +393,6 @@ case "${1:-up}" in
   infra) start_infra ;;
   status) status ;;
   down) stop_all ;;
-  stop | start | restart) svc_ctl "$1" "${2:?service name}" ;;
-  *) die "usage: up-full.sh [up|infra|status|down|stop|start|restart <service>]" ;;
+  stop | start | restart | rebuild) svc_ctl "$1" "${2:?service name}" ;;
+  *) die "usage: up-full.sh [up|infra|status|down|stop|start|restart|rebuild <service>]" ;;
 esac
