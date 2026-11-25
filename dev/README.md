@@ -12,3 +12,33 @@ provisioning. Seeds are written to `.nats/seeds/` (gitignored, dev-only). Stream
 created by `bus.Provision` with the admin credential; services never hold it (ADR-0011 B8).
 
 Ports: NATS `HOSTRY_NATS_PORT` (4222), Postgres `HOSTRY_PG_PORT` (5432), both bound to 127.0.0.1.
+
+## Full Phase 2 stack (every service on the host)
+
+    dev/up-full.sh            # keys, NATS accounts, Postgres, streams, then build + migrate + start all services
+    dev/up-full.sh infra      # only the Docker part
+    dev/up-full.sh status
+    dev/up-full.sh down       # stops the services, removes containers and volumes
+
+`compose.full.yaml` (own project `hostry-full`) runs NATS with the generated accounts and Postgres with one
+database per service: `identity`, `orders`, `sync` as the superuser (identity and orders `SET ROLE`);
+`tenancy`, `catalog`, `billing` with migrator, app, vendor/global and relay roles as in each
+`scripts/provision-roles.sql`; `platform_meta` with a stamped `genesis` restore epoch and the read-only
+`platform_reader`, which `ORDERS_PLATFORM_DSN` points at. All passwords are one throwaway dev value. The services
+are built from the sibling checkouts (`../svc-*`, each on its `feat/phase2-*` branch, with its own uncommitted
+`go.work`) into `dev/.local/bin`; no image is published (AM12). Keys, NATS seeds, logs and pids are under
+`dev/.local` (gitignored). Identity's realm keys are persistent, so a restart keeps tokens valid.
+
+- Event schemas come from `../api-specs-p2/events` (else `../api-specs/events`; `HOSTRY_EVENTS_DIR`). go-common's
+  `busdev` generates the accounts and, with `-provision`, creates the streams (256 MiB each) and consumers.
+- Ports (127.0.0.1): identity 8101, tenancy 8102, admin 8103, sync 8104, catalog 8105, orders 8106, billing 8107
+  (`HOSTRY_<SERVICE>_PORT`).
+- Wiring: user and vendor tokens are verified against identity's `/v1/jwks` and `/v1/vendor-jwks`; service tokens
+  against `dev/.local/keys/service-keys.jwks.json` (kid = service name). `BILLING_GRANT_ISSUER` is
+  `hostry-identity-vendor` (identity's grant issuer; billing's default is the contract's `.invalid` host). Catalog and
+  billing emit through the sync gateway (`CATALOG_SYNC_URL`, `BILLING_GATEWAY_URL`).
+- Sync: `HOSTRY_SYNC_DIRECTORY=identity` (default) selects the real identity directory. As of svc-sync `efa33de` the
+  gateway refuses to start on it (identity has no internal routes for Credential, PackFor, StillHolds, RecoveryFor,
+  Series), so `up-full.sh` reports sync as failed. `HOSTRY_SYNC_DIRECTORY=stub` runs the in-process stub directory
+  (`SYNC_DEV_STUB=1`). That build does not relay the gateway's outbox to NATS either.
+- Identity runs with the test SMS sender and the dev capture aids (`GET /dev/otp/{mobile}`).

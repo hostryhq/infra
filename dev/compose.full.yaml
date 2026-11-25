@@ -1,0 +1,48 @@
+# Phase 2 local stack: NATS (generated accounts) and Postgres with every service's
+# databases and roles. The services themselves run on the host (go run or built
+# binaries, started by dev/up-full.sh); no images are published (ADR-0001 AM12).
+# Dev only: the passwords below are throwaway and never reused anywhere.
+#
+# Databases: identity, orders, sync (superuser DSN, the services SET ROLE or run
+# their own migrations), tenancy, catalog, billing (provisioned roles, like
+# scripts/provision-roles.sql of each service) and platform_meta (the restore
+# epoch, read-only role platform_reader).
+name: ${COMPOSE_PROJECT_NAME:-hostry-full}
+
+services:
+  nats:
+    image: nats:2.15.3-alpine
+    command: ["-c", "/etc/nats/nats.conf"]
+    volumes:
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
+      - ${HOSTRY_NATS_CONF_DIR:-./.local/nats}/accounts.conf:/etc/nats/accounts.conf:ro
+      - nats-data:/data
+    ports:
+      - "127.0.0.1:${HOSTRY_NATS_PORT:-4222}:4222"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8222/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: hostry-dev-only
+      POSTGRES_USER: hostry
+      POSTGRES_DB: hostry
+    volumes:
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:${HOSTRY_PG_PORT:-5432}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      # The init scripts restart the server once; wait for the real one (the sentinel table is created last).
+      test: ["CMD-SHELL", "psql -U hostry -d platform_meta -tAc 'SELECT 1 FROM restore_epoch LIMIT 1' | grep -q 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+volumes:
+  nats-data:

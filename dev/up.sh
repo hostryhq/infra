@@ -3,7 +3,13 @@
 # Usage: dev/up.sh [path-to-api-specs/events] ; env GO_COMMON_DIR points at the go-common clone.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-events="${1:-$here/../../api-specs/events}"
+if [ -n "${1:-}" ]; then
+  events="$1"
+elif [ -d "$here/../../api-specs-p2/events" ]; then
+  events="$here/../../api-specs-p2/events" # the Phase 2 specs checkout, as in up-full.sh
+else
+  events="$here/../../api-specs/events"
+fi
 gocommon="${GO_COMMON_DIR:-$here/../../go-common}"
 conf="${HOSTRY_NATS_CONF_DIR:-$here/.nats}"
 (cd "$gocommon" && go run ./cmd/busdev -events "$events" -out "$conf")
