@@ -214,8 +214,21 @@ env_sync() {
   export SYNC_DIRECTORY="$sync_directory"
   export SYNC_IDENTITY_URL="http://127.0.0.1:$p_identity"
   export SYNC_SERVICE_SIGNING_KEY_FILE="$keys/sync.key"
-  # The in-process identity stub, only for HOSTRY_SYNC_DIRECTORY=stub.
-  if [ "$sync_directory" = stub ]; then export SYNC_DEV_STUB=1; fi
+  export HOSTRY_ENV=dev
+  # Outbox relay to NATS with sync's own credential (go-common outbox.Relay).
+  export SYNC_NATS_URL="$nats_url"
+  export SYNC_NATS_SEED_FILE="$natsconf/seeds/sync.nk"
+  if [ "$sync_directory" = stub ]; then
+    # The in-process identity stub and its dev registration routes (/dev/v1), only for HOSTRY_SYNC_DIRECTORY=stub.
+    export SYNC_DEV_STUB=1
+    export SYNC_DEV_REGISTER=1
+  else
+    # The real directory (ADR-0005 A3.2): identity and tenancy clients, the key that seals the gateway's own ops
+    # (public half is in identity's packs, see HOSTRY_OP_SIGNING_PUB_FILE), the service-key registry.
+    export SYNC_TENANCY_URL="http://127.0.0.1:$p_tenancy"
+    export SYNC_OP_SIGNING_KEY_FILE="$keys/sync-op.key"
+    export SYNC_SERVICE_KEYS="$keys/service-keys.jwks.json"
+  fi
 }
 
 env_admin() {
